@@ -10,21 +10,25 @@ import java.util.zip.CRC32;
 
 public class AwsEventStreamEncoder {
 
-    private AwsEventStreamEncoder() {}
+    private AwsEventStreamEncoder() {
+    }
 
     /**
      * Encodes the mandatory initial-response frame.
      * Must be the first frame sent in every SubscribeToShard response.
-     * Botocore's get_initial_response() will reject the stream if this is absent.
+     * Botocore's get_initial_response() checks :event-type (not :message-type)
+     * for the value "initial-response", so both headers are required.
      */
     public static byte[] encodeInitialResponse() throws IOException {
         Map<String, String> headers = new LinkedHashMap<>();
-        headers.put(":message-type", "initial-response");
+        headers.put(":message-type", "event");
+        headers.put(":event-type", "initial-response");
         return encodeFrame(headers, "{}".getBytes(StandardCharsets.UTF_8));
     }
 
     /**
-     * Encodes a single AWS binary event stream message (e.g. SubscribeToShardEvent).
+     * Encodes a single AWS binary event stream message (e.g.
+     * SubscribeToShardEvent).
      */
     public static byte[] encodeEvent(String eventType, String contentType, byte[] payload) throws IOException {
         Map<String, String> headers = new LinkedHashMap<>();
@@ -36,12 +40,12 @@ public class AwsEventStreamEncoder {
 
     /**
      * Wire format:
-     *   [total_byte_length: 4B BE]
-     *   [headers_byte_length: 4B BE]
-     *   [prelude_crc: 4B CRC32 over first 8 bytes]
-     *   [headers: variable]
-     *   [payload: variable]
-     *   [message_crc: 4B CRC32 over all preceding bytes]
+     * [total_byte_length: 4B BE]
+     * [headers_byte_length: 4B BE]
+     * [prelude_crc: 4B CRC32 over first 8 bytes]
+     * [headers: variable]
+     * [payload: variable]
+     * [message_crc: 4B CRC32 over all preceding bytes]
      */
     private static byte[] encodeFrame(Map<String, String> headers, byte[] payload) throws IOException {
         byte[] headersBytes = encodeHeaders(headers);

@@ -13,7 +13,7 @@ import io.github.hectorvent.floci.services.kinesis.model.KinesisConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.StreamingOutput
+import jakarta.ws.rs.core.StreamingOutput;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;

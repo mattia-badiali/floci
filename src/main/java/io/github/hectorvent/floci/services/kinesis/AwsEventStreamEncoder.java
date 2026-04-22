@@ -13,8 +13,28 @@ public class AwsEventStreamEncoder {
     private AwsEventStreamEncoder() {}
 
     /**
-     * Encodes a single AWS binary event stream message.
-     *
+     * Encodes the mandatory initial-response frame.
+     * Must be the first frame sent in every SubscribeToShard response.
+     * Botocore's get_initial_response() will reject the stream if this is absent.
+     */
+    public static byte[] encodeInitialResponse() throws IOException {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put(":message-type", "initial-response");
+        return encodeFrame(headers, "{}".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Encodes a single AWS binary event stream message (e.g. SubscribeToShardEvent).
+     */
+    public static byte[] encodeEvent(String eventType, String contentType, byte[] payload) throws IOException {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put(":message-type", "event");
+        headers.put(":event-type", eventType);
+        headers.put(":content-type", contentType);
+        return encodeFrame(headers, payload);
+    }
+
+    /**
      * Wire format:
      *   [total_byte_length: 4B BE]
      *   [headers_byte_length: 4B BE]
@@ -23,12 +43,7 @@ public class AwsEventStreamEncoder {
      *   [payload: variable]
      *   [message_crc: 4B CRC32 over all preceding bytes]
      */
-    public static byte[] encodeEvent(String eventType, String contentType, byte[] payload) throws IOException {
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put(":message-type", "event");
-        headers.put(":event-type", eventType);
-        headers.put(":content-type", contentType);
-
+    private static byte[] encodeFrame(Map<String, String> headers, byte[] payload) throws IOException {
         byte[] headersBytes = encodeHeaders(headers);
 
         int totalLength = 4 + 4 + 4 + headersBytes.length + payload.length + 4;
@@ -39,17 +54,15 @@ public class AwsEventStreamEncoder {
         dos.writeInt(totalLength);
         dos.writeInt(headersBytes.length);
 
-        // Prelude CRC (over first 8 bytes written so far)
-        byte[] prelude = baos.toByteArray();
-        dos.writeInt((int) crc32(prelude));
+        // Prelude CRC (CRC32 of first 8 bytes)
+        dos.writeInt((int) crc32(baos.toByteArray()));
 
         dos.write(headersBytes);
         dos.write(payload);
         dos.flush();
 
-        // Message CRC (over everything so far)
-        byte[] withoutMsgCrc = baos.toByteArray();
-        dos.writeInt((int) crc32(withoutMsgCrc));
+        // Message CRC (CRC32 of everything so far)
+        dos.writeInt((int) crc32(baos.toByteArray()));
         dos.flush();
 
         return baos.toByteArray();

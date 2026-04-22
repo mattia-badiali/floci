@@ -265,6 +265,7 @@ public class KinesisJsonHandler {
         return Response.ok(response).build();
     }
 
+    @SuppressWarnings("unchecked")
     private Response handleSubscribeToShard(JsonNode request, String region) {
         String consumerArn = request.has("ConsumerARN") ? request.path("ConsumerARN").asText(null) : null;
         String shardId = request.has("ShardId") ? request.path("ShardId").asText(null) : null;
@@ -276,7 +277,6 @@ public class KinesisJsonHandler {
             throw new AwsException("InvalidArgumentException", "ShardId is required", 400);
         }
 
-        // Validate consumer and resolve stream name
         KinesisConsumer consumer = service.describeStreamConsumer(null, null, consumerArn, region);
         String streamName = parseStreamNameFromArn(consumer.getStreamArn());
         if (streamName == null) {
@@ -284,7 +284,6 @@ public class KinesisJsonHandler {
                     "Cannot resolve stream name from consumer ARN: " + consumerArn, 400);
         }
 
-        // Parse StartingPosition
         JsonNode startingPosition = request.path("StartingPosition");
         String posType = startingPosition.path("Type").asText("LATEST");
         String seqNumber = startingPosition.has("SequenceNumber")
@@ -302,13 +301,10 @@ public class KinesisJsonHandler {
         }
 
         String iterator = service.getShardIterator(streamName, shardId, posType, seqNumber, timestampMillis, region);
-
-        @SuppressWarnings("unchecked")
         Map<String, Object> result = service.getRecords(iterator, 10000, region);
         List<KinesisRecord> records = (List<KinesisRecord>) result.get("Records");
         long millisBehind = ((Number) result.get("MillisBehindLatest")).longValue();
 
-        // Build JSON payload
         ObjectNode payload = objectMapper.createObjectNode();
         ArrayNode recordsArray = payload.putArray("Records");
         String lastSeq = null;
@@ -327,12 +323,14 @@ public class KinesisJsonHandler {
         payload.put("MillisBehindLatest", millisBehind);
 
         try {
+            byte[] initialFrame = AwsEventStreamEncoder.encodeInitialResponse();
             byte[] payloadBytes = objectMapper.writeValueAsBytes(payload);
-            byte[] frame = AwsEventStreamEncoder.encodeEvent(
+            byte[] eventFrame = AwsEventStreamEncoder.encodeEvent(
                     "SubscribeToShardEvent", "application/json", payloadBytes);
 
             StreamingOutput streamingOutput = output -> {
-                output.write(frame);
+                output.write(initialFrame);  // ← MUST be first; botocore requires initial-response
+                output.write(eventFrame);
                 output.flush();
             };
 
